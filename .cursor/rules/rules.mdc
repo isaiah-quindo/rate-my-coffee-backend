@@ -1,0 +1,325 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+Our backend is Laravel Framework
+
+Database Schema are as follows: (Note that the users schema is the default larvel generated users/athentication)
+
+-- =========================================
+-- RateMyCoffee: Core SQL Schema (PostgreSQL)
+-- =========================================
+
+-- Extensions (safe no-ops if already enabled)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- OPTIONAL: enable if PostGIS is installed (otherwise leave commented)
+-- CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- =======================
+-- ENUM TYPES
+-- =======================
+CREATE TYPE post_status AS ENUM ('draft','published','flagged','removed');
+CREATE TYPE shop_status AS ENUM ('active','temporarily_closed','permanently_closed','draft','pending_verification');
+CREATE TYPE price_tier  AS ENUM ('₱','₱₱','₱₱₱');
+
+CREATE OR REPLACE FUNCTION public.coffee_shop_search_tsv(
+    p_name                TEXT,
+    p_city_municipality   TEXT,
+    p_province            TEXT,
+    p_tags                TEXT[]
+) RETURNS tsvector
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT
+        setweight(to_tsvector('simple'::regconfig, coalesce(p_name,'')),               'A'::"char") ||
+        setweight(to_tsvector('simple'::regconfig, coalesce(p_city_municipality,'')), 'B'::"char") ||
+        setweight(to_tsvector('simple'::regconfig, coalesce(p_province,'')),          'C'::"char") ||
+        setweight(to_tsvector('simple'::regconfig,
+                     coalesce(array_to_string(p_tags,' '),'')),                       'D'::"char");
+$$;
+
+-- =======================
+-- COFFEE SHOPS
+-- =======================
+CREATE TABLE coffee_shops (
+  id                    BIGSERIAL PRIMARY KEY,
+
+  -- Identity
+  name                  TEXT NOT NULL,
+  slug                  TEXT UNIQUE,
+  status                shop_status NOT NULL DEFAULT 'active',
+  description           TEXT,
+
+  -- Address (PH context)
+  country_code          CHAR(2) NOT NULL DEFAULT 'PH',
+  region                TEXT,
+  province              TEXT,
+  city_municipality     TEXT,
+  barangay              TEXT,
+  street_address        TEXT,
+  postcode              TEXT,
+
+  -- Coordinates (non-PostGIS; keep even if you also use PostGIS)
+  latitude              NUMERIC(9,6) CHECK (latitude >= -90 AND latitude <= 90),
+  longitude             NUMERIC(9,6) CHECK (longitude >= -180 AND longitude <= 180),
+
+  -- Contact & presence
+  phone                 TEXT,
+  email                 TEXT,
+  website_url           TEXT,
+  facebook_url          TEXT,
+  instagram_handle      TEXT,
+  google_maps_url       TEXT,
+
+  -- Commercial hints
+  price                 price_tier,
+  accepts_gcash         BOOLEAN NOT NULL DEFAULT TRUE,
+  accepts_cards         BOOLEAN NOT NULL DEFAULT TRUE,
+
+  -- Amenities
+  has_wifi              BOOLEAN NOT NULL DEFAULT TRUE,
+  has_outlets           BOOLEAN NOT NULL DEFAULT TRUE,
+  outdoor_seating       BOOLEAN NOT NULL DEFAULT FALSE,
+  parking_available     BOOLEAN NOT NULL DEFAULT FALSE,
+  wheelchair_accessible BOOLEAN NOT NULL DEFAULT FALSE,
+  pet_friendly          BOOLEAN NOT NULL DEFAULT FALSE,
+  vegan_options         BOOLEAN NOT NULL DEFAULT FALSE,
+  manual_brew           BOOLEAN NOT NULL DEFAULT FALSE,
+  decaf_available       BOOLEAN NOT NULL DEFAULT FALSE,
+
+  tags                  TEXT[] DEFAULT '{}'::TEXT[],
+
+  -- Claiming
+  claimed_by_user_id    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  claiming_notes        TEXT,
+
+  -- Ratings cache (optional; can be maintained via job)
+  rating_overall_cache  NUMERIC(3,2),
+  rating_count_cache    INTEGER,
+
+-- Search
+search_tsv tsvector GENERATED ALWAYS AS (
+    public.coffee_shop_search_tsv(name, city_municipality, province, tags)
+) STORED,
+
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Avoid obvious duplicates (name + city/province, case-insensitive)
+CREATE UNIQUE INDEX coffee_shops_unique_name_city_prov
+  ON coffee_shops (lower(name), lower(coalesce(city_municipality,'')), lower(coalesce(province,'')));
+
+-- Indexes
+CREATE INDEX coffee_shops_status_idx     ON coffee_shops(status);
+CREATE INDEX coffee_shops_geo_idx        ON coffee_shops(latitude, longitude);
+CREATE INDEX coffee_shops_city_idx       ON coffee_shops(lower(city_municipality));
+CREATE INDEX coffee_shops_trgm_name_idx  ON coffee_shops USING GIN (name gin_trgm_ops);
+CREATE INDEX coffee_shops_search_tsv_gin ON coffee_shops USING GIN (search_tsv);
+
+-- Hours (multiple intervals per day allowed)
+CREATE TABLE shop_hours (
+  shop_id        BIGINT NOT NULL REFERENCES coffee_shops(id) ON DELETE CASCADE,
+  day_of_week    SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sun … 6=Sat
+  open_time      TIME,
+  close_time     TIME,
+  is_24h         BOOLEAN NOT NULL DEFAULT FALSE,
+  notes          TEXT,
+  PRIMARY KEY (shop_id, day_of_week, open_time)
+);
+
+-- Shop photos
+CREATE TABLE shop_photos (
+  id           BIGSERIAL PRIMARY KEY,
+  shop_id      BIGINT NOT NULL REFERENCES coffee_shops(id) ON DELETE CASCADE,
+  url          TEXT NOT NULL,
+  caption      TEXT,
+  is_cover     BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order   INT NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX shop_photos_shop_idx ON shop_photos(shop_id, is_cover, sort_order);
+
+-- Alternate names
+CREATE TABLE shop_aliases (
+  shop_id   BIGINT NOT NULL REFERENCES coffee_shops(id) ON DELETE CASCADE,
+  alias     TEXT NOT NULL,
+  PRIMARY KEY (shop_id, alias)
+);
+
+-- Updated-at trigger (reusable)
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER coffee_shops_set_updated_at
+BEFORE UPDATE ON coffee_shops
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- =======================
+-- POSTS (REVIEWS)
+-- =======================
+CREATE TABLE posts (
+  id                  BIGSERIAL PRIMARY KEY,
+  shop_id             BIGINT NOT NULL REFERENCES coffee_shops(id) ON DELETE CASCADE,
+  author_user_id      BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  is_anonymous        BOOLEAN NOT NULL DEFAULT FALSE,
+
+  body                TEXT,
+
+  -- Per-aspect ratings (0.5–5.0 step 0.5, validated by trigger below)
+  ratings             JSONB NOT NULL,
+
+  -- Visit & spend metadata
+  visited_at          DATE,
+  spend_php           NUMERIC(10,2) CHECK (spend_php >= 0),
+  ordered_items       TEXT[] DEFAULT '{}'::TEXT[],
+
+  -- Optional flavor sliders (free-form)
+  taste_profile       JSONB,                 -- e.g., {"acidity":3.5,"body":4}
+
+  seat_context        TEXT,
+  internet_speed_mbps NUMERIC(6,2) CHECK (internet_speed_mbps >= 0),
+
+  -- Moderation & lifecycle
+  status              post_status NOT NULL DEFAULT 'published',
+  flagged_count       INTEGER NOT NULL DEFAULT 0,
+  admin_notes         TEXT,
+  deleted_at          TIMESTAMPTZ,
+
+  -- Privacy-safe client metadata
+  ip_hash             BYTEA,
+  user_agent          TEXT,
+
+  -- Timestamps
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Generated overall score: average of present rating keys
+  overall_score       NUMERIC(3,2) GENERATED ALWAYS AS (
+    (
+      COALESCE((ratings->>'coffee_quality')::NUMERIC, 0) +
+      COALESCE((ratings->>'vibe')::NUMERIC, 0) +
+      COALESCE((ratings->>'service')::NUMERIC, 0) +
+      COALESCE((ratings->>'value')::NUMERIC, 0) +
+      COALESCE((ratings->>'wifi')::NUMERIC, 0) +
+      COALESCE((ratings->>'noise')::NUMERIC, 0) +
+      COALESCE((ratings->>'seating')::NUMERIC, 0) +
+      COALESCE((ratings->>'outlets')::NUMERIC, 0) +
+      COALESCE((ratings->>'cleanliness')::NUMERIC, 0) +
+      COALESCE((ratings->>'food')::NUMERIC, 0) +
+      COALESCE((ratings->>'location_convenience')::NUMERIC, 0) +
+      COALESCE((ratings->>'consistency')::NUMERIC, 0)
+    )
+    /
+    NULLIF(
+      (
+        (CASE WHEN ratings ? 'coffee_quality' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'vibe' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'service' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'value' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'wifi' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'noise' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'seating' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'outlets' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'cleanliness' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'food' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'location_convenience' THEN 1 ELSE 0 END) +
+        (CASE WHEN ratings ? 'consistency' THEN 1 ELSE 0 END)
+      ), 0)
+  ) STORED
+);
+
+-- Indexes
+CREATE INDEX posts_shop_idx   ON posts(shop_id);
+CREATE INDEX posts_author_idx ON posts(author_user_id) WHERE author_user_id IS NOT NULL;
+CREATE INDEX posts_status_idx ON posts(status);
+CREATE INDEX posts_created_idx ON posts(created_at DESC);
+CREATE INDEX posts_ratings_gin ON posts USING GIN (ratings jsonb_path_ops);
+
+-- Unique: one published/draft review per user per shop
+CREATE UNIQUE INDEX posts_unique_user_shop ON posts(shop_id, author_user_id)
+  WHERE author_user_id IS NOT NULL AND status IN ('published','draft');
+
+-- Updated-at trigger
+CREATE TRIGGER posts_set_updated_at
+BEFORE UPDATE ON posts
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Validate ratings (0.5..5.0, in 0.5 steps, numeric only)
+CREATE OR REPLACE FUNCTION posts_validate_ratings()
+RETURNS TRIGGER AS $$
+DECLARE
+  k TEXT;
+  v JSONB;
+  n NUMERIC;
+BEGIN
+  IF NEW.ratings IS NULL OR jsonb_typeof(NEW.ratings) <> 'object' THEN
+    RAISE EXCEPTION 'ratings must be a JSON object';
+  END IF;
+
+  FOR k, v IN SELECT key, value FROM jsonb_each(NEW.ratings)
+  LOOP
+    IF jsonb_typeof(v) <> 'number' THEN
+      RAISE EXCEPTION 'ratings["%"] must be a number', k;
+    END IF;
+
+    n := (v::TEXT)::NUMERIC;  -- cast json number text to numeric
+    IF n < 0.5 OR n > 5.0 THEN
+      RAISE EXCEPTION 'ratings["%"]=%, must be between 0.5 and 5.0', k, n;
+    END IF;
+
+    -- enforce 0.5 step: n*2 must be integer
+    IF (n * 2) <> trunc(n * 2) THEN
+      RAISE EXCEPTION 'ratings["%"]=%, must be in 0.5 increments', k, n;
+    END IF;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER posts_validate_ratings_trg
+BEFORE INSERT OR UPDATE OF ratings ON posts
+FOR EACH ROW EXECUTE FUNCTION posts_validate_ratings();
+
+-- =======================
+-- POST PHOTOS & VOTES
+-- =======================
+CREATE TABLE post_photos (
+  id        BIGSERIAL PRIMARY KEY,
+  post_id   BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  url       TEXT NOT NULL,
+  caption   TEXT,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX post_photos_post_idx ON post_photos(post_id, sort_order);
+
+CREATE TABLE post_votes (
+  post_id   BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  is_helpful BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+-- =======================
+-- RATINGS VIEW (live)
+-- =======================
+CREATE OR REPLACE VIEW shop_rating_stats AS
+SELECT
+  p.shop_id,
+  COUNT(*)::INT AS rating_count,
+  ROUND(AVG(p.overall_score)::numeric, 2) AS rating_overall
+FROM posts p
+WHERE p.status = 'published' AND p.overall_score IS NOT NULL
+GROUP BY p.shop_id;
