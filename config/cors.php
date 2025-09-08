@@ -2,7 +2,7 @@
 
 return [
     // Apply CORS to API routes
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'auth/*', 'sanctum/csrf-cookie'],
 
     // Allow specific origins (no wildcard when using credentials)
     'allowed_origins' => [

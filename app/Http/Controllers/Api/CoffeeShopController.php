@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Schema;
 
 class CoffeeShopController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware(['auth:sanctum', 'can:manage-coffee-shops'])->only(['store', 'update', 'destroy']);
+    }
     public function store(Request $request)
     {
         // Get and parse JSON data manually to handle potential formatting issues
@@ -144,6 +148,12 @@ class CoffeeShopController extends Controller
         $shop->save();
 
         return response()->json($shop->fresh(), 200);
+    }
+
+    public function destroy(CoffeeShop $shop)
+    {
+        $shop->delete();
+        return response()->json(null, 204);
     }
 
 

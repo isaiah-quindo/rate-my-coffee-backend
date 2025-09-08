@@ -5,10 +5,16 @@ use App\Http\Controllers\Api\CoffeeShopController;
 use App\Http\Controllers\Api\ShopHourController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\ShopPhotoController;
+use App\Http\Controllers\Api\AuthController;
 
 Route::middleware('api')->group(function () {
-    Route::post('/coffee-shops', [CoffeeShopController::class, 'store']);
-    Route::patch('/coffee-shops/{shop}', [CoffeeShopController::class, 'update']);
+    // Auth
+    Route::post('/auth/register', [AuthController::class, 'register']);
+    Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
+    Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
+    Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');
+    // Public endpoints
     Route::get('/coffee-shops', [CoffeeShopController::class, 'index']);
     // Get all coffee shops locations
     Route::get('/coffee-shops/locations', [CoffeeShopController::class, 'locations']);
@@ -35,4 +41,9 @@ Route::middleware('api')->group(function () {
     Route::get('/photos/{photo}', [ShopPhotoController::class, 'show']);
     Route::patch('/photos/{photo}', [ShopPhotoController::class, 'update']);
     Route::delete('/photos/{photo}', [ShopPhotoController::class, 'destroy']);
+
+    // Admin-only endpoints (enforced by controller middleware Auth + Gate)
+    Route::post('/coffee-shops', [CoffeeShopController::class, 'store']);
+    Route::patch('/coffee-shops/{shop}', [CoffeeShopController::class, 'update']);
+    Route::delete('/coffee-shops/{shop}', [CoffeeShopController::class, 'destroy']);
 });

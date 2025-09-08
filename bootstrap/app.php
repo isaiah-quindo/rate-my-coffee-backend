@@ -12,7 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Enable CORS for all requests using config/cors.php
+        $middleware->use([\Illuminate\Http\Middleware\HandleCors::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
