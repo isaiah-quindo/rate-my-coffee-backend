@@ -8,6 +8,7 @@ use App\Models\Post;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class PostController extends Controller
 {
@@ -15,7 +16,6 @@ class PostController extends Controller
     public function store(Request $request, CoffeeShop $shop)
     {
         $validated = $request->validate([
-            'author_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'is_anonymous' => ['nullable', 'boolean'],
             'body' => ['nullable', 'string'],
             'ratings' => ['required', 'array'],
@@ -28,13 +28,13 @@ class PostController extends Controller
             'seat_context' => ['nullable', 'string'],
             'internet_speed_mbps' => ['nullable', 'numeric', 'min:0'],
             'status' => ['nullable', Rule::in(['draft', 'published', 'flagged', 'removed'])],
-            'flagged_count' => ['nullable', 'integer', 'min:0'],
-            'admin_notes' => ['nullable', 'string'],
-            'ip_hash' => ['nullable', 'string'],
-            'user_agent' => ['nullable', 'string'],
         ]);
 
-        $attributes = array_merge(['shop_id' => $shop->id], $validated);
+        // Automatically set the author from authenticated user
+        $attributes = array_merge([
+            'shop_id' => $shop->id,
+            'author_user_id' => $request->user()->id,
+        ], $validated);
 
         // Bind ordered_items as native Postgres text[] using ARRAY[...]::text[]
         if (array_key_exists('ordered_items', $attributes) && is_array($attributes['ordered_items'])) {
@@ -75,8 +75,12 @@ class PostController extends Controller
     // Update a post by ID
     public function update(Request $request, Post $post)
     {
+        // Check if user can update this post (must be the author)
+        if ($post->author_user_id !== $request->user()->id) {
+            return response()->json(['error' => 'Unauthorized to update this post'], 403);
+        }
+
         $validated = $request->validate([
-            'author_user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
             'is_anonymous' => ['sometimes', 'nullable', 'boolean'],
             'body' => ['sometimes', 'nullable', 'string'],
             'ratings' => ['sometimes', 'required', 'array'],
@@ -89,10 +93,6 @@ class PostController extends Controller
             'seat_context' => ['sometimes', 'nullable', 'string'],
             'internet_speed_mbps' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'status' => ['sometimes', 'nullable', Rule::in(['draft', 'published', 'flagged', 'removed'])],
-            'flagged_count' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'admin_notes' => ['sometimes', 'nullable', 'string'],
-            'ip_hash' => ['sometimes', 'nullable', 'string'],
-            'user_agent' => ['sometimes', 'nullable', 'string'],
         ]);
 
         if (array_key_exists('ordered_items', $validated) && is_array($validated['ordered_items'])) {
@@ -111,9 +111,71 @@ class PostController extends Controller
     }
 
     // Delete a post by ID
-    public function destroy(Post $post)
+    public function destroy(Request $request, Post $post)
     {
+        // Check if user can delete this post (must be the author)
+        if ($post->author_user_id !== $request->user()->id) {
+            return response()->json(['error' => 'Unauthorized to delete this post'], 403);
+        }
+
         $post->delete();
         return response()->noContent();
+    }
+
+    // Get authenticated user's posts (paginated)
+    public function indexByAuthUser(Request $request)
+    {
+        try {
+            $user = $request->user();
+            if (!$user) {
+                return response()->json(['error' => 'Unauthenticated'], 401);
+            }
+
+            $query = Post::query()
+                ->where('author_user_id', $user->id)
+                ->with(['shop' => function ($query) {
+                    $query->select('id', 'name', 'slug', 'city_municipality', 'province');
+                }])
+                ->orderBy('created_at', 'desc');
+
+            // Filters
+            if ($request->filled('is_anonymous')) {
+                $query->where(
+                    'is_anonymous',
+                    filter_var($request->input('is_anonymous'), FILTER_VALIDATE_BOOLEAN)
+                );
+            }
+
+            if ($request->filled('status')) {
+                $query->where('status', $request->string('status'));
+            }
+
+            // Pagination
+            $perPage = (int) $request->input('posts_per_page', 15);
+            $perPage = max(1, min(100, $perPage)); // clamp between 1 and 100
+
+            $posts = $query->paginate($perPage, ['*'], 'posts_page');
+
+            // ✅ Return a clean structure
+            return response()->json([
+                'data'         => $posts->items(),     // just the posts
+                'current_page' => $posts->currentPage(),
+                'last_page'    => $posts->lastPage(),
+                'per_page'     => $posts->perPage(),
+                'total'        => $posts->total(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in indexByAuthUser: ' . $e->getMessage(), [
+                'user_id'   => $request->user()?->id,
+                'exception' => $e
+            ]);
+
+            return response()->json([
+                'error'   => 'Failed to fetch posts',
+                'message' => app()->environment('local')
+                    ? $e->getMessage()
+                    : 'An unexpected error occurred'
+            ], 500);
+        }
     }
 }

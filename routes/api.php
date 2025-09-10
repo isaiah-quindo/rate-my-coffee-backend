@@ -14,6 +14,7 @@ Route::middleware('api')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
     Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');
+
     // Public endpoints
     Route::get('/coffee-shops', [CoffeeShopController::class, 'index']);
     // Get all coffee shops locations
@@ -30,10 +31,12 @@ Route::middleware('api')->group(function () {
 
     // Reviews routes
     Route::get('/coffee-shops/{shop}/reviews', [PostController::class, 'indexByShop']);
-    Route::post('/coffee-shops/{shop}/reviews', [PostController::class, 'store']);
     Route::get('/reviews/{post}', [PostController::class, 'show']);
-    Route::patch('/reviews/{post}', [PostController::class, 'update']);
-    Route::delete('/reviews/{post}', [PostController::class, 'destroy']);
+
+    // Protected review routes (require authentication)
+    Route::post('/coffee-shops/{shop}/reviews', [PostController::class, 'store'])->middleware('auth:sanctum');
+    Route::patch('/reviews/{post}', [PostController::class, 'update'])->middleware('auth:sanctum');
+    Route::delete('/reviews/{post}', [PostController::class, 'destroy'])->middleware('auth:sanctum');
 
     // Shop Photos routes
     Route::get('/coffee-shops/{shop}/photos', [ShopPhotoController::class, 'index']);
@@ -46,4 +49,7 @@ Route::middleware('api')->group(function () {
     Route::post('/coffee-shops', [CoffeeShopController::class, 'store']);
     Route::patch('/coffee-shops/{shop}', [CoffeeShopController::class, 'update']);
     Route::delete('/coffee-shops/{shop}', [CoffeeShopController::class, 'destroy']);
+
+    // User posts endpoint (placed last to avoid route conflicts)
+    Route::get('/users/me/posts', [PostController::class, 'indexByAuthUser'])->middleware('auth:sanctum');
 });
