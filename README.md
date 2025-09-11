@@ -7,6 +7,12 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## RateMyCoffee Project Guidelines
+
+This repository uses project-specific rules and database conventions. Please read and follow the guidelines in `.cursor/rules/rules.mdc` before making changes (migrations, models, validations, triggers, search indexes, etc.).
+
+- Rules file: `.cursor/rules/rules.mdc`
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
