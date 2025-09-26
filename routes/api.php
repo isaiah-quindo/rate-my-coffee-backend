@@ -7,13 +7,14 @@ use App\Http\Controllers\Api\ShopHourController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\ShopPhotoController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\SocialAuthController;
 
 Route::middleware('api')->group(function () {
     // Auth
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
-    Route::get('/auth/facebook/redirect', [AuthController::class, 'redirectToFacebook']);
-    Route::get('/auth/facebook/callback', [AuthController::class, 'handleFacebookCallback']);
+    Route::get('/auth/facebook/redirect', [SocialAuthController::class, 'redirectToFacebook']);
+    Route::get('/auth/facebook/callback', [SocialAuthController::class, 'handleFacebookCallback']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
     Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');
