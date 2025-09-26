@@ -27,4 +27,13 @@ return [
 
     // Must be true when sending cookies/authorization headers
     'supports_credentials' => true,
+
+    'paths' => ['api/*', 'auth/*', 'sanctum/csrf-cookie', 'auth/facebook/*'],
+    'allowed_methods' => ['*'],
+    'allowed_origins' => [env('FRONTEND_URL')],
+    'allowed_headers' => ['*'],
+    'exposed_headers' => [],
+    'max_age' => 0,
+    'supports_credentials' => true,
+
 ];

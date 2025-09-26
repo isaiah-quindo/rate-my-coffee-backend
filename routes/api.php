@@ -1,5 +1,6 @@
 ﻿<?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\CoffeeShopController;
 use App\Http\Controllers\Api\ShopHourController;
@@ -54,4 +55,8 @@ Route::middleware('api')->group(function () {
 
     // User posts endpoint (placed last to avoid route conflicts)
     Route::get('/users/me/posts', [PostController::class, 'indexByAuthUser'])->middleware('auth:sanctum');
+});
+
+Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+    return $request->user();
 });

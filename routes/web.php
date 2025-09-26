@@ -17,4 +17,10 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-require __DIR__.'/auth.php';
+use App\Http\Controllers\SocialAuthController;
+
+Route::get('auth/facebook/redirect', [SocialAuthController::class, 'redirectToFacebook']);
+Route::get('auth/facebook/callback',  [SocialAuthController::class, 'handleFacebookCallback']);
+
+
+require __DIR__ . '/auth.php';
