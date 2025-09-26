@@ -109,6 +109,11 @@ class AuthController extends Controller
 
     public function handleFacebookCallback(Request $request)
     {
+        // Facebook returns a single-use authorization code. Ensure it's present.
+        if (!$request->query('code')) {
+            return response()->json(['message' => 'Missing authorization code'], 400);
+        }
+
         try {
             $facebookUser = Socialite::driver('facebook')->stateless()->user();
 
@@ -117,9 +122,10 @@ class AuthController extends Controller
                 return response()->json(['message' => 'Invalid Facebook user data'], 400);
             }
         } catch (Throwable $e) {
-            Log::warning('Facebook authentication failed', [
+            Log::error('Facebook authentication failed', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'code' => $request->query('code'),
+                'state' => $request->query('state'),
             ]);
             return response()->json(['message' => 'Unable to authenticate with Facebook'], 401);
         }
