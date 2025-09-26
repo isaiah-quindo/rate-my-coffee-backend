@@ -7,7 +7,11 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Http\Response;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -88,5 +92,81 @@ class AuthController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
         return response()->json($user);
+    }
+
+    public function redirectToFacebook()
+    {
+        $redirectUrl = Socialite::driver('facebook')
+            ->stateless()
+            ->scopes(['email'])
+            ->redirect()
+            ->getTargetUrl();
+
+        return response()->json([
+            'url' => $redirectUrl,
+        ]);
+    }
+
+    public function handleFacebookCallback(Request $request)
+    {
+        try {
+            $facebookUser = Socialite::driver('facebook')->stateless()->user();
+
+            // Validate Facebook user data
+            if (!$facebookUser->getId()) {
+                return response()->json(['message' => 'Invalid Facebook user data'], 400);
+            }
+        } catch (Throwable $e) {
+            Log::warning('Facebook authentication failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Unable to authenticate with Facebook'], 401);
+        }
+
+        $user = User::query()->where('facebook_id', $facebookUser->getId())->first();
+
+        $email = $facebookUser->getEmail();
+
+        if (!$user && $email) {
+            $userWithEmail = User::query()->where('email', $email)->first();
+
+            if ($userWithEmail) {
+                if ($userWithEmail->facebook_id && $userWithEmail->facebook_id !== $facebookUser->getId()) {
+                    return response()->json([
+                        'message' => 'Email already associated with another Facebook account',
+                    ], 409);
+                }
+
+                if (!$userWithEmail->facebook_id) {
+                    $userWithEmail->facebook_id = $facebookUser->getId();
+                    $userWithEmail->save();
+                }
+
+                $user = $userWithEmail;
+            }
+        }
+
+        if (!$user) {
+            $emailForUser = $email ?: sprintf('fb_%s@facebook.local', $facebookUser->getId());
+
+            if (!$email && User::query()->where('email', $emailForUser)->exists()) {
+                $emailForUser = sprintf('fb_%s_%s@facebook.local', $facebookUser->getId(), Str::uuid()->toString());
+            }
+
+            $user = User::query()->create([
+                'name' => $facebookUser->getName() ?: $facebookUser->getNickname() ?: 'Facebook User',
+                'email' => $emailForUser,
+                'password' => Hash::make(Str::random(40)),
+                'facebook_id' => $facebookUser->getId(),
+            ]);
+        }
+
+        $token = $user->createToken('api')->plainTextToken;
+
+        return response()->json([
+            'user' => $user,
+            'token' => $token,
+        ]);
     }
 }

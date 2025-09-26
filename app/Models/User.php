@@ -22,6 +22,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'facebook_id',
     ];
 
     /**
@@ -83,3 +84,4 @@ class User extends Authenticatable
         return $this->roles()->whereIn('slug', $roles)->count() === count($roles);
     }
 }
+

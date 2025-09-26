@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\CoffeeShopController;
@@ -11,6 +11,8 @@ Route::middleware('api')->group(function () {
     // Auth
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::get('/auth/facebook/redirect', [AuthController::class, 'redirectToFacebook']);
+    Route::get('/auth/facebook/callback', [AuthController::class, 'handleFacebookCallback']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
     Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');
