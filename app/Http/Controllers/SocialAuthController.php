@@ -21,7 +21,12 @@ class SocialAuthController extends Controller
         try {
             $fbUser = Socialite::driver('facebook')->stateless()->user();
         } catch (\Exception $e) {
-            return redirect(env('FRONTEND_URL') . '/auth/error?msg=fb_error');
+            \Log::error('Facebook authentication failed', [
+                'error' => $e->getMessage(),
+                'code' => $request->query('code'),
+                'state' => $request->query('state'),
+            ]);
+            return redirect(env('FRONTEND_URL') . '/auth/error?msg=' . urlencode($e->getMessage()));
         }
 
         // Find or create user
