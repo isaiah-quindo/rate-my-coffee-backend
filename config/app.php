@@ -17,6 +17,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | This value is the URL of your frontend application, used for redirects
+    | after OAuth callbacks.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'https://ratemycoffee.ph'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |

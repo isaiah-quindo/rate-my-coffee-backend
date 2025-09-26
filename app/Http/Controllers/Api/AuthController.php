@@ -182,9 +182,13 @@ class AuthController extends Controller
 
         $token = $user->createToken('api')->plainTextToken;
 
-        return response()->json([
-            'user' => $user,
+        // Redirect to frontend with token and user data
+        $frontendUrl = config('app.frontend_url', 'https://ratemycoffee.ph');
+        $redirectUrl = $frontendUrl . '/auth/facebook/callback?' . http_build_query([
             'token' => $token,
+            'user' => base64_encode(json_encode($user->toArray())),
         ]);
+
+        return redirect($redirectUrl);
     }
 }
