@@ -94,13 +94,25 @@ class AuthController extends Controller
         return response()->json($user);
     }
 
-    public function redirectToFacebook()
+    public function redirectToFacebook(Request $request)
     {
-        $redirectUrl = Socialite::driver('facebook')
+        $driver = Socialite::driver('facebook')
             ->stateless()
-            ->scopes(['email'])
-            ->redirect()
-            ->getTargetUrl();
+            ->scopes(['email']);
+
+        // Allow an optional callback_url override, but only for our public frontend domain
+        $callbackUrl = (string) $request->query('callback_url', '');
+        if ($callbackUrl !== '') {
+            $parts = parse_url($callbackUrl);
+            $host = $parts['host'] ?? '';
+            $scheme = $parts['scheme'] ?? '';
+            if ($scheme === 'https' && $host === 'ratemycoffee.ph') {
+                // Note: The exact callback URL MUST be whitelisted in Facebook App settings
+                $driver = $driver->redirectUrl($callbackUrl);
+            }
+        }
+
+        $redirectUrl = $driver->redirect()->getTargetUrl();
 
         return response()->json([
             'url' => $redirectUrl,
