@@ -1,10 +1,112 @@
----
-description:
-globs:
-alwaysApply: true
----
+# AGENTS.md
 
-Our backend is Laravel Framework
+Purpose: shared ground rules and quick context for any AI or human agent working on this Laravel API. Keep changes surgical, safe, and aligned with the existing style.
+
+## Project Overview
+- Framework: Laravel (API + web views)
+- Auth: Laravel Sanctum (token/cookie based)
+- Domain: Coffee shops, reviews, photos, and opening hours
+- Key Areas:
+  - API routes: `routes/api.php`
+  - Web routes: `routes/web.php`
+  - Controllers (API): `app/Http/Controllers/Api/*`
+  - Models: `app/Models/*`
+  - Requests: `app/Http/Requests/*`
+  - Migrations: `database/migrations/*`
+  - Config: `config/*`
+
+## How To Work In This Repo
+- Scope: Only change what the task requires. No drive‑by refactors.
+- Files: Read related controller, model, request, migration, and route files before changing behavior.
+- Style: Match existing Laravel conventions and project patterns. Prefer Eloquent, validation via Form Requests or `->validate`, and consistent JSON responses.
+- Safety: Do not introduce new packages unless explicitly requested. Avoid breaking public endpoints.
+- Tools: Use `apply_patch` to edit files. Do not `git commit` unless asked. Keep diffs minimal and focused.
+- Secrets: Never commit or print secrets. Respect `.env` and `config/*` boundaries.
+- Network/FS: Assume limited network. Don’t add external calls or write outside the workspace.
+
+## API At A Glance (routes/api.php)
+- Auth
+  - `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` (auth:sanctum)
+  - `GET /auth/user/me` (auth:sanctum), `GET /auth/user/{id}` (auth:sanctum)
+- Coffee Shops
+  - `GET /coffee-shops`
+  - `GET /coffee-shops/locations`
+  - `GET /coffee-shops/{slug}` then `GET /coffee-shops/{shop}` (order matters: slug vs model binding)
+  - Admin‑only (via controller middleware + Gate):
+    - `POST /coffee-shops`
+    - `PATCH /coffee-shops/{shop}`
+    - `DELETE /coffee-shops/{shop}`
+- Shop Hours (nested under a shop)
+  - `GET /coffee-shops/{shop}/hours`
+  - `POST /coffee-shops/{shop}/hours`
+  - `GET|PATCH|DELETE /coffee-shops/{shop}/hours/{day}/{open}`
+- Reviews
+  - `GET /coffee-shops/{shop}/reviews`
+  - `GET /reviews/{post}`
+  - Auth required: `POST /coffee-shops/{shop}/reviews`, `PATCH /reviews/{post}`, `DELETE /reviews/{post}`
+- Photos
+  - `GET /coffee-shops/{shop}/photos`, `POST /coffee-shops/{shop}/photos`
+  - `GET|PATCH|DELETE /photos/{photo}`
+- User content
+  - `GET /users/me/posts` (auth:sanctum)
+
+## Authorization & Validation
+- Auth: Use `auth:sanctum` for protected routes. Rely on existing middleware wiring in controllers when present (e.g., CoffeeShop admin actions).
+- Gates/Policies: Respect `can:manage-coffee-shops` checks for admin endpoints. Don’t bypass or duplicate in routes if controller already applies them.
+- Validation: Prefer Form Request classes for complex inputs; otherwise use `$request->validate([...])`. Keep error codes consistent: 422 for validation, 401/403 for authz, 404 for not found, 409 for conflicts, 200/201/204 for success.
+
+## Data & Migrations
+- Migrations live in `database/migrations`. If altering schema:
+  - Add a new migration; do not edit old ones that have shipped.
+  - Keep names chronological and descriptive.
+  - Provide reversible `down()` logic where possible.
+- Models define relationships and casts. Use them rather than raw queries when feasible.
+- Be mindful of Postgres array handling (e.g., `tags` on `coffee_shops` is serialized as a text[] literal in `CoffeeShopController::store`). Preserve current encoding/format unless explicitly changing.
+
+## Responses & Errors
+- JSON only for API. Use `response()->json($payload, $status)`.
+- Pagination: Prefer Laravel paginator/length‑aware when listing potentially large sets.
+- Consistency: Include a clear message for errors. Avoid leaking stack traces.
+
+## Files, Storage, and CORS
+- File uploads and remote storage are configured via `config/filesystems.php` and `config/services.php`. Respect disk choices and URL generation already present in controllers.
+- CORS is managed in `config/cors.php`. If adding new public endpoints, ensure CORS stays appropriate.
+
+## Common Playbooks
+- Add a new API endpoint
+  1) Define route in `routes/api.php` with correct middleware.
+  2) Implement method in the appropriate `Api\*Controller`.
+  3) Validate input via Form Request or `$request->validate`.
+  4) Use Eloquent; return JSON with correct status code.
+  5) Add conflict/exists checks and 404s where applicable.
+- Extend a model with a relation or cast
+  1) Update `app/Models/*` minimally.
+  2) If schema changes, add a migration.
+  3) Prefer accessors/mutators for serialization changes.
+- Add a migration
+  1) Create a new timestamped migration.
+  2) Keep `down()` safe and mirrored.
+  3) Don’t modify old migrations.
+
+## Quality Bar
+- Keep patches minimal, focused, and consistent with surrounding code.
+- Don’t introduce global behavior changes through config unless requested.
+- Use explicit types and constraints in validation.
+- Avoid N+1 queries; eager‑load where needed.
+- Prefer small, composable controller methods; avoid monolith methods.
+
+## Local Runbook (for humans)
+- Install deps: `composer install`
+- Env: copy `.env.example` → `.env`, configure DB + `SANCTUM_STATEFUL_DOMAINS` if using SPA/cookies
+- Generate key: `php artisan key:generate`
+- Migrate: `php artisan migrate`
+- Serve: `php artisan serve` (or via your web server setup)
+
+## When In Doubt
+- Read `routes/api.php` and the corresponding controller/model before changing behavior.
+- Preserve route order when there is potential conflict (e.g., slug vs ID bindings).
+- Don’t add dependencies, services, or external I/O without an explicit requirement.
+- Ask for clarification if a change would affect authz, data shape, or public endpoints.
 
 Database Schema are as follows: (Note that the users schema is the default larvel generated users/athentication)
 
@@ -77,19 +179,19 @@ CREATE TABLE coffee_shops (
 
   -- Commercial hints
   price                 price_tier,
-  accepts_gcash         BOOLEAN NOT NULL DEFAULT TRUE,
-  accepts_cards         BOOLEAN NOT NULL DEFAULT TRUE,
+  accepts_gcash         BOOLEAN DEFAULT NULL,
+  accepts_cards         BOOLEAN DEFAULT NULL,
 
   -- Amenities
-  has_wifi              BOOLEAN NOT NULL DEFAULT TRUE,
-  has_outlets           BOOLEAN NOT NULL DEFAULT TRUE,
-  outdoor_seating       BOOLEAN NOT NULL DEFAULT FALSE,
-  parking_available     BOOLEAN NOT NULL DEFAULT FALSE,
-  wheelchair_accessible BOOLEAN NOT NULL DEFAULT FALSE,
-  pet_friendly          BOOLEAN NOT NULL DEFAULT FALSE,
-  vegan_options         BOOLEAN NOT NULL DEFAULT FALSE,
-  manual_brew           BOOLEAN NOT NULL DEFAULT FALSE,
-  decaf_available       BOOLEAN NOT NULL DEFAULT FALSE,
+  has_wifi              BOOLEAN DEFAULT NULL,
+  has_outlets           BOOLEAN DEFAULT NULL,
+  outdoor_seating       BOOLEAN DEFAULT NULL,
+  parking_available     BOOLEAN DEFAULT NULL,
+  wheelchair_accessible BOOLEAN DEFAULT NULL,
+  pet_friendly          BOOLEAN DEFAULT NULL,
+  vegan_options         BOOLEAN DEFAULT NULL,
+  manual_brew           BOOLEAN DEFAULT NULL,
+  decaf_available       BOOLEAN DEFAULT NULL,
 
   tags                  TEXT[] DEFAULT '{}'::TEXT[],
 
@@ -323,3 +425,6 @@ SELECT
 FROM posts p
 WHERE p.status = 'published' AND p.overall_score IS NOT NULL
 GROUP BY p.shop_id;
+
+---
+This file is intended to be always treated as context for any agent making changes here. Adhere to these constraints to keep the API consistent and safe.
