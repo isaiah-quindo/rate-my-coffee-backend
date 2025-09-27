@@ -13,8 +13,7 @@ Route::middleware('api')->group(function () {
     // Auth
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
-    Route::get('/auth/facebook/redirect', [SocialAuthController::class, 'redirectToFacebook']);
-    Route::get('/auth/facebook/callback', [SocialAuthController::class, 'handleFacebookCallback']);
+    Route::post('/auth/google', [SocialAuthController::class, 'googleAuthentication']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
     Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');

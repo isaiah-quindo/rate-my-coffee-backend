@@ -2,75 +2,72 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use Laravel\Socialite\Facades\Socialite;
 use App\Models\User;
+use Exception;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class SocialAuthController extends Controller
 {
-    public function redirectToFacebook()
+    public function googleLogin()
     {
-        // stateless() is convenient for API usage (no server session state)
-        return Socialite::driver('facebook')->stateless()->redirect();
+        return Socialite::driver('google')->redirect();
     }
 
-    public function handleFacebookCallback(Request $request)
+    public function googleAuthentication(Request $request)
     {
-        // Retrieve user info from Facebook
         try {
-            $fbUser = Socialite::driver('facebook')->stateless()->user();
-        } catch (\Exception $e) {
-            \Log::error('Facebook authentication failed', [
-                'error' => $e->getMessage(),
-                'code' => $request->query('code'),
-                'state' => $request->query('state'),
-            ]);
-            return redirect(env('FRONTEND_URL') . '/auth/error?msg=' . urlencode($e->getMessage()));
-        }
+            // Get the token from request
+            $token = $request->input('credential');
+            if (!$token) {
+                return response()->json(['message' => 'No token provided'], 400);
+            }
 
-        // Find or create user
-        $user = User::where('facebook_id', $fbUser->getId())
-            ->first();
+            // Get the Google user details using the token
+            $googleUser = Socialite::driver('google')->stateless()->userFromToken($token);
 
-        if (!$user) {
-            // if same email exists, link accounts
-            $user = User::where('email', $fbUser->getEmail())->first();
-            if ($user) {
-                $user->update([
-                    'facebook_id' => $fbUser->getId(),
-                ]);
-            } else {
-                $user = User::create([
-                    'name' => $fbUser->getName() ?? $fbUser->getNickname() ?? 'Facebook User',
-                    'email' => $fbUser->getEmail(),
-                    'facebook_id' => $fbUser->getId(),
-                    'password' => bcrypt(Str::random(24)), // random password
+            // Find existing user
+            $existingUser = User::where('google_id', $googleUser->id)
+                ->orWhere('email', $googleUser->email)
+                ->first();
+
+            if ($existingUser) {
+                // Update Google ID if user exists but doesn't have it set
+                if (!$existingUser->google_id) {
+                    $existingUser->update(['google_id' => $googleUser->id]);
+                }
+
+                // Generate Sanctum token
+                $token = $existingUser->createToken('google-auth')->plainTextToken;
+
+                return response()->json([
+                    'user' => $existingUser,
+                    'token' => $token
                 ]);
             }
+
+            // Create new user
+            $newUser = User::create([
+                'name' => $googleUser->name,
+                'email' => $googleUser->email,
+                'password' => Hash::make(Str::random(24)),
+                'google_id' => $googleUser->id,
+            ]);
+
+            // Generate Sanctum token
+            $token = $newUser->createToken('google-auth')->plainTextToken;
+
+            return response()->json([
+                'user' => $newUser,
+                'token' => $token
+            ], 201);
+        } catch (Exception $e) {
+            \Log::error('Google authentication error: ' . $e->getMessage());
+            return response()->json(['message' => 'Authentication failed'], 500);
         }
-
-        // create a Sanctum personal access token
-        $token = $user->createToken('facebook')->plainTextToken;
-
-        // Option A (recommended if frontend and api share cookie domain):
-        // set token as HTTP-only cookie and redirect to frontend
-        $frontend = env('FRONTEND_URL', 'http://localhost:3000');
-        $cookie = cookie(
-            'api_token',        // name
-            $token,             // value
-            60 * 24 * 30,       // minutes (30 days)
-            '/',                // path
-            env('COOKIE_DOMAIN', null), // domain (e.g. .yourdomain.com) OR null for current host
-            true,               // secure
-            true,               // httpOnly
-            false,              // raw
-            'None'              // sameSite: 'None' to allow cross-site (when using secure)
-        );
-
-        return redirect($frontend . '/auth/success')->withCookie($cookie);
-
-        // Option B (if you can't set cross-site cookies): redirect with token in fragment
-        // return redirect($frontend . '/auth/success#token=' . $token);
     }
 }
