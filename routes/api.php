@@ -16,6 +16,7 @@ Route::middleware('api')->group(function () {
     Route::post('/auth/google', [SocialAuthController::class, 'googleAuthentication']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::get('/auth/user/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
+    Route::patch('/auth/user/me', [AuthController::class, 'updateMe'])->middleware('auth:sanctum');
     Route::get('/auth/user/{id}', [AuthController::class, 'showUser'])->middleware('auth:sanctum');
 
     // Public endpoints
